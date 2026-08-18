@@ -121,18 +121,10 @@ export async function createReadonlySession(
     },
     setup: agentCtx => ctx.agentPresets.mount(agentCtx, PRESET_ID).then(() => undefined),
   })
-  const session = handle.agent.session
-  // Lock the composition: a closed zero-length turn makes the session
-  // non-blank, so the upstream switch guard permanently refuses any preset
-  // change — the read-only tool surface is structurally fixed from birth.
-  session.append('turn/start', { turn: 1 })
-  session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
-  // Permission stance: read-only + interactive approval (fail-closed without
-  // an answerer). The knobs remain switchable, but no mutating tool exists to
-  // consume a wider sandbox mode, so a switch has no effect.
-  setSandboxMode(session, 'read-only')
-  setApprovalPolicy(session, 'ask')
-  return session
+  // The lock and the permission seeds are applied by the session/created
+  // listener (see apply), so every creation path — this command AND the
+  // workspace-picker menu's direct RPC create — is covered identically.
+  return handle.agent.session
 }
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -142,14 +134,32 @@ export const name = 'dsh-no-workspace'
 export const inject = ['commands', 'agents', 'sessions', 'agentPresets', 'settings']
 
 /**
+ * Apply the read-only lock and permission seeds to one no-workspace session.
+ * The zero-length turn pair makes the session permanently non-blank, so the
+ * upstream switch guard refuses any preset change — the read-only tool
+ * surface is structurally fixed from birth. The knobs remain switchable, but
+ * no mutating tool exists to consume a wider sandbox mode, so a switch has no
+ * effect. Idempotent: a session already carrying a turn is left untouched.
+ * @param session - the session to lock; only `no-workspace` sessions are touched.
+ */
+export function lockReadonlySession(session: import('@deepseek-ai/dsh-session').Session): void {
+  if (session.header.agentPreset !== PRESET_ID) return
+  if (session.events.some(event => event.type === 'turn/start')) return
+  session.append('turn/start', { turn: 1 })
+  session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+  setSandboxMode(session, 'read-only')
+  setApprovalPolicy(session, 'ask')
+}
+
+/**
  * Mount the host plugin: preset install, roster hide, settings namespace,
  * and the `/readonly-session` command.
  * @param ctx - plugin context.
  * @param config - resolved plugin config.
  */
 export function apply(ctx: Context, config: Config): void {
-  const isolatedRoot = config.isolatedRoot ?? dshHomePath('.dsh-no-workspace')
-  const hiddenPresets = config.hiddenPresets ?? [PRESET_ID]
+  const isolatedRoot = config.isolatedRoot || dshHomePath('.dsh-no-workspace')
+  const hiddenPresets = config.hiddenPresets?.length ? config.hiddenPresets : [PRESET_ID]
   const defaultModel = config.defaultModel ?? { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'low' }
 
   // The preset install has nothing to undo; the disposer is the empty function.
@@ -170,6 +180,13 @@ export function apply(ctx: Context, config: Config): void {
   installSettingsSection(ctx, SETTINGS_NS, settingsSchema, { isolatedRoot }, {
     setSource: () => {},
     onChange: () => {},
+  })
+
+  // Every no-workspace session gets the lock and the permission seeds at
+  // publication, whichever path created it: this command, the workspace-picker
+  // menu's direct RPC create, or a later resume.
+  ctx.on('session/created', (session) => {
+    lockReadonlySession(session)
   })
 
   ctx.commands.register({

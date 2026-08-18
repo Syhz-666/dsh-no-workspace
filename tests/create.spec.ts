@@ -1,17 +1,18 @@
 /**
  * createReadonlySession: isolated directory cwd, the hidden preset mounted,
- * the zero-length turn lock, and the read-only/ask permission seeds — all
- * via the same public services the plugin ships against.
+ * and the low-effort model default. The lock and permission seeds are owned
+ * by lockReadonlySession (applied at session/created by the plugin), tested
+ * separately below.
  */
 
 import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SessionStore from '@deepseek-ai/dsh-session'
-import { createReadonlySession } from '../src/index.ts'
+import { createReadonlySession, lockReadonlySession } from '../src/index.ts'
 
 const temps: string[] = []
 
@@ -21,22 +22,20 @@ function tempRoot(): string {
   return dir
 }
 
-afterEach(() => {
-  // Temp dirs are intentionally left for inspection on failure; best-effort cleanup.
-})
-
 describe('createReadonlySession', () => {
-  it('creates a session on the hidden preset with the isolated cwd, the turn lock, and the permission seeds', async () => {
+  it('creates a session on the hidden preset with the isolated cwd and the low-effort model default', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)
     await ctx.plugin(AgentRegistry)
     const isolatedRoot = tempRoot()
     const mounted: string[] = []
+    let seenOptions: unknown
     ctx.provide('agentPresets', {
       mount: (_agentCtx: unknown, id?: string) => { mounted.push(id ?? ''); return Promise.resolve({ id: id ?? '' }) },
     } as never)
     ctx.agents.setFactory({
       async createAgent(_ownerCtx, options) {
+        seenOptions = options.agentOptions
         const session = ctx.sessions.create(
           options.sessionId,
           options.meta === undefined ? {} : { meta: options.meta },
@@ -59,15 +58,44 @@ describe('createReadonlySession', () => {
     })
 
     expect(mounted).toEqual(['no-workspace'])
+    expect(seenOptions).toMatchObject({
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-flash',
+      reasoningEffort: 'low',
+    })
     expect(session.header.agentPreset).toBe('no-workspace')
     expect(session.header.cwd).toBe(join(isolatedRoot, session.id))
-    const types = session.events.map(event => event.type)
-    // The lock pair and the permission seeds land in the log.
-    expect(types).toContain('turn/start')
-    expect(types).toContain('turn/end')
+  })
+})
+
+describe('lockReadonlySession', () => {
+  it('locks a no-workspace session: the turn pair plus the permission seeds', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const session = ctx.sessions.create('session-lock-1', { meta: { agentPreset: 'no-workspace' } })
+    lockReadonlySession(session)
+    expect(session.events.some(event => event.type === 'turn/start')).toBe(true)
+    expect(session.events.some(event => event.type === 'turn/end')).toBe(true)
     expect(session.events.find(event => event.type === 'sandbox/mode')?.data.mode).toBe('read-only')
     expect(session.events.find(event => event.type === 'approval/policy')?.data.policy).toBe('ask')
-    // The lock predicate: the session is permanently non-blank.
-    expect(session.events.some(event => event.type === 'turn/start')).toBe(true)
+  })
+
+  it('is idempotent: an already-locked session is not touched again', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const session = ctx.sessions.create('session-lock-2', { meta: { agentPreset: 'no-workspace' } })
+    lockReadonlySession(session)
+    lockReadonlySession(session)
+    expect(session.events.filter(event => event.type === 'turn/start')).toHaveLength(1)
+    expect(session.events.filter(event => event.type === 'sandbox/mode')).toHaveLength(1)
+  })
+
+  it('leaves other sessions untouched', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const session = ctx.sessions.create('session-lock-3', { meta: { agentPreset: 'standard' } })
+    lockReadonlySession(session)
+    expect(session.events.some(event => event.type === 'turn/start')).toBe(false)
+    expect(session.events.some(event => event.type === 'sandbox/mode')).toBe(false)
   })
 })
