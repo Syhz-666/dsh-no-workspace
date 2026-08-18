@@ -193,12 +193,17 @@ export function apply(ctx: Context, config: Config): void {
 
   // A session switched to this preset while blank (picker) locks the same way:
   // the zero-length turn pair lands immediately, so the upstream switch guard
-  // refuses every later composition change.
+  // refuses every later composition change. The event fires synchronously
+  // inside the session/event publication of the selection itself — appending
+  // the turn pair right there would reenter the store's append — so the lock
+  // is deferred one microtask, after the publication closes.
   ctx.on('agent-preset/selected', (sessionId, agentPreset) => {
     if (agentPreset !== PRESET_ID) return
-    const session = ctx.sessions.get(sessionId)
-    if (session === undefined) return
-    lockReadonlySession(session)
+    queueMicrotask(() => {
+      const session = ctx.sessions.get(sessionId)
+      if (session === undefined) return
+      lockReadonlySession(session)
+    })
   })
 
   ctx.commands.register({

@@ -120,4 +120,25 @@ describe('lockReadonlySession', () => {
     lockReadonlySession(session)
     expect(session.events.some(event => event.type === 'turn/start')).toBe(false)
   })
+
+  it('pins the store rejection that forces the switch-lock to defer: appending inside a session/event publication reenters', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const session = ctx.sessions.create('session-lock-6')
+    let error: unknown
+    const off = ctx.on('session/event', () => {
+      try {
+        session.append('turn/start', { turn: 1 })
+      } catch (caught) {
+        error = caught
+      }
+    })
+    try {
+      session.append('session/title', { title: 'x' })
+    } finally {
+      off()
+    }
+    expect(error).toBeInstanceOf(Error)
+    expect(String(error)).toMatch(/reenter/)
+  })
 })

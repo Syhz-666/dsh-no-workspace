@@ -1,24 +1,29 @@
 /**
  * One-time migration for sessions created by the retired `chat-only` preset
  * (the fusion-era design that preceded dsh-no-workspace). Such sessions are
- * permanently unopenable on current builds: their creation header names a
- * preset that no longer exists, so resume fails at composition. The official
- * escape hatch is the `agent-preset/selected` log event — `resolveSessionPreset`
- * prefers the newest such event over the header — so appending one selecting
- * `no-workspace` makes the session open under the read-only preset without
- * touching its header or its history.
+ * unopenable and invisible on current builds:
  *
- * The append is a plain durable event batch: one checksummed Zstandard frame
- * of one JSONL line, seq-continuing the log, exactly as the official backend
- * writes an append batch. Idempotent: sessions that already carry a
- * selection event are skipped.
+ * - their creation header names a preset that no longer exists, so resume
+ *   fails at composition;
+ * - their header has no `cwd`, and `session.list` filters cold sessions
+ *   without one, so they never appear in the UI.
  *
- * Usage: node scripts/migrate-legacy-session.mjs [sessionRoot]
- * Default session root: $DSH_HOME/sessions (DSH_HOME defaults to ~/.dsh).
+ * The migration relocates the session into the isolation root and rewrites
+ * its header with the new cwd (a durable append would be the official path
+ * for a preset switch — `resolveSessionPreset` prefers the newest
+ * `agent-preset/selected` event — but cwd is a creation header field, so the
+ * header itself is repaired and the artifact moved to its new path). All
+ * event frames are preserved byte-for-byte; an `agent-preset/selected:
+ * no-workspace` event is appended, exactly as the official backend writes an
+ * append batch. Idempotent: sessions that already carry a selection event
+ * are skipped.
+ *
+ * Usage: node scripts/migrate-legacy-session.mjs [sessionRoot] [isolatedRoot]
+ * Defaults: $DSH_HOME/sessions and $DSH_HOME/.dsh-no-workspace.
  */
 
-import { readdir, readFile, appendFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { readdir, readFile, writeFile, mkdir, rm } from 'node:fs/promises'
+import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { promisify } from 'node:util'
 import { constants, zstdCompress, zstdDecompressSync } from 'node:zlib'
@@ -26,6 +31,9 @@ import { constants, zstdCompress, zstdDecompressSync } from 'node:zlib'
 const zstdCompressAsync = promisify(zstdCompress)
 const CHECKSUM_OPTIONS = { params: { [constants.ZSTD_c_checksumFlag]: 1 } }
 const ZSTD_MAGIC = 0xFD2FB528
+const home = homedir()
+const sessionRoot = process.argv[2] ?? join(home, '.dsh', 'sessions')
+const isolatedRoot = process.argv[3] ?? join(home, '.dsh', '.dsh-no-workspace')
 
 /** Locate complete zstd frame ranges (mirror of the official scanner). */
 function scanFrames(buffer) {
@@ -78,7 +86,42 @@ function decodeLog(buffer) {
   for (const frame of frames) {
     text += zstdDecompressSync(buffer.subarray(frame.start, frame.end)).toString('utf8')
   }
-  return text.split('\n').filter(Boolean)
+  return { frames, text: text.split('\n').filter(Boolean) }
+}
+
+/** The official project-directory key for a cwd (mirror of format.ts). */
+function projectKey(cwd) {
+  let readable = ''
+  let separatorRun = false
+  for (const ch of cwd) {
+    if (ch === '/' || ch === '\\' || ch === ':') {
+      if (!separatorRun) readable += '-'
+      separatorRun = true
+    } else if (ch !== '~' && /^[A-Za-z0-9._-]$/.test(ch)) {
+      readable += ch
+      separatorRun = false
+    } else {
+      readable += `~${ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`
+      separatorRun = false
+    }
+  }
+  const slug = readable.replace(/^-+/, '') || 'root'
+  return `--${slug.slice(0, 251)}--`
+}
+
+/** The official per-session id segment (mirror of format.ts). */
+function encodeSegment(raw) {
+  if (raw === '.') return '~002E'
+  if (raw === '..') return '~002E~002E'
+  let out = ''
+  for (const ch of raw) {
+    if (ch !== '~' && /^[A-Za-z0-9._-]$/.test(ch)) {
+      out += ch
+    } else {
+      out += `~${ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`
+    }
+  }
+  return out
 }
 
 /** Recursively find every session artifact. */
@@ -93,9 +136,7 @@ async function findSessionLogs(root) {
     }
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
-      if (entry.name === '.pnpm' || entry.name === 'node_modules') continue
       const path = join(dir, entry.name)
-      if (entry.name.endsWith('.jsonl.zstd')) continue
       const nested = await readdir(path).catch(() => [])
       const artifact = nested.find((name) => name === 'session.jsonl.zstd' || name === 'session.jsonl')
       if (artifact !== undefined) {
@@ -109,7 +150,6 @@ async function findSessionLogs(root) {
   return found
 }
 
-const sessionRoot = process.argv[2] ?? join(homedir(), '.dsh', 'sessions')
 const logs = await findSessionLogs(sessionRoot)
 console.log(`scanning ${logs.length} session dirs under ${sessionRoot}`)
 
@@ -117,7 +157,7 @@ let migrated = 0
 for (const { dir, artifact } of logs) {
   const logPath = join(dir, artifact)
   const raw = await readFile(logPath)
-  const lines = decodeLog(raw)
+  const { frames, text: lines } = decodeLog(raw)
   if (lines.length === 0) continue
   let header
   try {
@@ -126,6 +166,14 @@ for (const { dir, artifact } of logs) {
     continue
   }
   if (header.type !== 'session' || header.agentPreset !== 'chat-only') continue
+  if (typeof header.id !== 'string') {
+    console.log(`skip (header without id): ${logPath}`)
+    continue
+  }
+  if (typeof header.cwd === 'string') {
+    console.log(`skip (already has cwd): ${header.id}`)
+    continue
+  }
   const selected = lines.some((line) => {
     try {
       return JSON.parse(line).type === 'agent-preset/selected'
@@ -133,10 +181,14 @@ for (const { dir, artifact } of logs) {
       return false
     }
   })
-  if (selected) {
-    console.log(`skip (already selected): ${header.id}`)
-    continue
-  }
+
+  // New home: an isolated directory under the isolation root, and the
+  // session artifact relocated to its project-keyed path.
+  const cwd = join(isolatedRoot, header.id)
+  await mkdir(cwd, { recursive: true })
+  const target = join(sessionRoot, projectKey(cwd), encodeSegment(header.id), 'session.jsonl.zstd')
+  await mkdir(dirname(target), { recursive: true })
+
   const lastSeq = lines.reduce((max, line) => {
     try {
       const event = JSON.parse(line)
@@ -145,16 +197,28 @@ for (const { dir, artifact } of logs) {
       return max
     }
   }, -1)
-  const event = {
-    type: 'agent-preset/selected',
-    seq: lastSeq + 1,
-    time: Date.now(),
-    data: { agentPreset: 'no-workspace' },
+
+  // Rewrite: new header frame + all original event frames (+ one selection
+  // frame when the earlier event-only migration has not run yet).
+  const newHeader = { ...header, cwd }
+  const headerFrame = await zstdCompressAsync(Buffer.from(JSON.stringify(newHeader) + '\n'), CHECKSUM_OPTIONS)
+  const eventFrames = frames.slice(1).map((frame) => raw.subarray(frame.start, frame.end))
+  let tail = Buffer.alloc(0)
+  if (!selected) {
+    const selection = {
+      type: 'agent-preset/selected',
+      seq: lastSeq + 1,
+      time: Date.now(),
+      data: { agentPreset: 'no-workspace' },
+    }
+    tail = await zstdCompressAsync(Buffer.from(JSON.stringify(selection) + '\n'), CHECKSUM_OPTIONS)
+    console.log(`migrated ${header.id} -> cwd ${cwd} (selection seq ${selection.seq})`)
+  } else {
+    console.log(`migrated ${header.id} -> cwd ${cwd} (selection already logged)`)
   }
-  const frame = await zstdCompressAsync(Buffer.from(JSON.stringify(event) + '\n'), CHECKSUM_OPTIONS)
-  await appendFile(logPath, frame)
+  await writeFile(target, Buffer.concat([headerFrame, ...eventFrames, tail]))
+  await rm(dir, { recursive: true, force: true })
   migrated += 1
-  console.log(`migrated ${header.id}: appended agent-preset/selected -> no-workspace (seq ${event.seq})`)
 }
 
 console.log(migrated === 0 ? 'no legacy chat-only sessions found' : `migrated ${migrated} session(s)`)
