@@ -1,18 +1,53 @@
-# dsh-no-workspace
+<h1 align="center">dsh-no-workspace</h1>
 
-为 DeepSeek Harness 提供**只读会话**的插件。
+<p align="center">
+  <strong>为 DeepSeek Harness 提供「只读会话」的插件。</strong><br>
+  不选工作区，即刻开始；会话一经创建，永久只读。
+</p>
 
-- 工作区选择器菜单里有「**不使用工作区（只读会话）**」入口：直接创建无工作区会话（隔离目录）；预设「只读会话」同时可见于模式选择器；
-- 会话工具面**只读且永久锁定**：只有 `read`/`glob`/`grep`（隔离目录内相对路径免审批；**其余读取每次调用需用户审批**）、`web_search`、会话历史、任务与目标工具；没有 Shell、没有写入工具、没有子代理；
-- 默认模型 `deepseek-v4-flash` + `reasoningEffort: 'low'`，会话内可随时手动修改；
-- `/readonly-session` 命令创建「无工作区」会话：工作目录是 `$DSH_HOME/.dsh-no-workspace/<sessionId>/` 下的空隔离目录。
+<p align="center"><sub>社区插件，并非 DeepSeek 官方产品。</sub></p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-4493F8?style=flat-square" alt="Supported platforms">
+  <a href="https://github.com/topics/dsh-plugin"><img src="https://img.shields.io/badge/dsh-plugin-4D6BFE?style=flat" alt="dsh-plugin"></a>
+</p>
+
+## 这是什么
+
+`dsh-no-workspace` 是一个 DeepSeek Harness（`dsh`）插件：在工作区选择器中提供「**不使用工作区（只读会话）**」入口，并提供「**只读会话**」模式。无论从哪个入口进入，会话都被结构性锁定为只读——只能对话、网页检索、查会话历史、跟踪任务与目标；文件读取需逐次审批，没有 Shell、没有写入工具、没有子代理。
+
+## 主要功能
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>不使用工作区（只读会话）</h3>
+      <p>工作区选择器菜单中的入口：点击后直接创建无工作区会话并跳转进入。会话工作目录是 <code>$DSH_HOME/.dsh-no-workspace/&lt;sessionId&gt;/</code> 下的空隔离目录。</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>结构性只读锁定</h3>
+      <p>会话成为只读的瞬间写入零长度 <code>turn/start</code>+<code>turn/end</code>，使其永久非 blank，官方预设切换守卫从此拒绝任何预设变更——工具面不可升级。</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>只读会话模式</h3>
+      <p>「只读会话」同时出现在模式选择器中，已有会话可切换进入（同样立即锁定）。也可用 <code>/readonly-session</code> 命令创建。</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>与官方构建零耦合</h3>
+      <p>不修改官方源码、不修改官方构建产物、不装饰任何官方服务。菜单项由精确路由在 serve 时于内存中注入官方 bundle，官方包重建、升级、<code>pnpm install</code> 后无需任何重放操作。</p>
+    </td>
+  </tr>
+</table>
 
 ## 安装
 
-前置：本机已有一份**已构建**的官方 dsh 项目（在其目录内执行过 `pnpm install && pnpm run build`）。以下步骤中的 `<插件目录>`、`<dsh 项目目录>` 请替换为实际路径，不要照抄示例。
+前置：本机已有一份**已构建**的官方 dsh 项目（在其目录内执行过 `pnpm install && pnpm run build`）。以下步骤中的 `<仓库地址>`、`<dsh 项目目录>` 请替换为实际路径，不要照抄示例。
 
 ```sh
-# 1. 获取插件源码（替换 <仓库地址> 为实际远端地址）
+# 1. 获取插件源码
 git clone <仓库地址> dsh-no-workspace
 cd dsh-no-workspace
 
@@ -33,7 +68,7 @@ pnpm dsh web
 
 说明：
 
-- 第 3 步会把插件登记到 `$DSH_HOME/profiles/web`（`$DSH_HOME` 默认为 `~/.dsh`），路径写法与平台无关；
+- 第 3 步把插件登记到 `$DSH_HOME/profiles/web`（`$DSH_HOME` 默认为 `~/.dsh`），路径写法与平台无关；
 - 首次启动时插件把 `presets/no-workspace` 复制到 `$DSH_HOME/.agent-presets/no-workspace/`（幂等，用户编辑过的副本不会被覆盖）；
 - 把本 README 与仓库链接一起交给 AI 时，AI 按上述四步执行即可完成安装，无需任何手工改动官方项目。
 
@@ -41,6 +76,7 @@ pnpm dsh web
 
 - 打开工作区选择器 → 「不使用工作区（只读会话）」；或输入 `/readonly-session` 命令；或创建会话后在模式选择器中选择「只读会话」。
 - 会话一经选择即被锁定：写入零长度 `turn/start`+`turn/end` 使其永久非 blank，官方预设切换守卫（`agent-preset-locked`）从此拒绝任何预设变更。
+- 默认模型 `deepseek-v4-flash` + `reasoningEffort: 'low'`，会话内可随时手动修改。
 
 ## 安全模型
 
@@ -50,13 +86,15 @@ pnpm dsh web
 | 无写入/无命令 | `no-workspace` 预设只挂只读工具；官方 `tool-fs`（read/write/edit）与 Shell 工具从不挂载 |
 | 文件访问受控 | 绝对路径 → 每次调用用户审批（fail-closed）；相对路径 → 仅当会话目录位于隔离根（`settings.dsh-no-workspace.isolatedRoot`）之内时免审批，否则同样审批；无会话目录的读取直接拒绝 |
 | 权限旋钮无效果 | 沙箱模式可切换，但没有写工具消费更宽的模式；只读由工具面结构性保证 |
-| 与官方构建零耦合 | 不修改官方源码、不修改官方构建产物、不装饰任何官方服务；菜单项由精确路由在 serve 时于内存中注入官方 bundle，重新构建/升级官方包后无需任何重放操作 |
 
-## 兼容性
+## 与官方项目的关系
 
-- 工具/命令/预设各守各的作用域与数据；不覆盖任何官方组件；
+本项目是 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 的社区插件，基于官方插件机制构建：
+
+- 工具/命令/预设各守各的作用域与数据，不覆盖任何官方组件；
 - 唯一的共享面是用户预设名录（`$DSH_HOME/.agent-presets/no-workspace`），由插件安装、幂等复制；
-- 菜单项由 host 端的精确路由在 serve 时注入官方 bundle 内容（内存装饰，可逆，卸载即还原）；官方包重建、升级、`pnpm install` 均不影响本插件。
+- 菜单项由 host 端的精确路由在 serve 时注入官方 bundle 内容（内存装饰，可逆，卸载即还原）；
+- 核心的智能体、模型、工具、会话、Web UI 与插件生态均来自官方项目，本插件只在其上添加「只读会话」这一项能力。
 
 ## 开发
 
@@ -66,4 +104,10 @@ pnpm run build     # tsc（host）+ tsdown（host + browser bundle）
 pnpm test          # vitest
 ```
 
-目录：`src/`（命令/隔离/锁定/设置/菜单注入）、`src/tools/`（只读工具）、`src/client/`（菜单项）、`presets/`（预设组合）。
+目录：`src/`（命令/隔离/锁定/设置/菜单注入）、`src/tools/`（只读工具）、`src/client/`（菜单项）、`presets/`（预设组合）。完整设计记录见 [docs/design.md](docs/design.md)。
+
+## License
+
+本项目遵循 [MIT License](LICENSE)。
+
+> 本项目是 DeepSeek Harness 的社区插件，并非 DeepSeek 官方产品。DeepSeek 是 DeepSeek AI 的商标。
