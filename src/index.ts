@@ -1,10 +1,11 @@
 /**
- * dsh-no-workspace host plugin: the "start a read-only session without
- * choosing a workspace" entry point. Owns the isolated directory, the
- * `/readonly-session` command, the preset install into the user roster, the
- * roster-hide decoration, and the settings namespace exposing the isolated
- * root to the browser half. The read-only tool set registers through the
- * preset row (`./tools` subpath), so it lands in the preset's scope layer.
+ * dsh-no-workspace host plugin: the "read-only session" entry point. Owns the
+ * isolated directory, the `/readonly-session` command, the preset install
+ * into the user roster (visible in every picker), the settings namespace
+ * exposing the isolated root, and the structural lock that makes a
+ * no-workspace session permanently read-only. The read-only tool set
+ * registers through the preset row (`./tools` subpath), so it lands in the
+ * preset's scope layer.
  * @module dsh-no-workspace
  */
 
@@ -25,22 +26,29 @@ import type {} from '@deepseek-ai/dsh-settings'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import { setApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
-import { installHide } from './hide.ts'
+
+// The published 0.1.0-rc.7 typings predate the upstream `agent-preset/selected`
+// event declaration; the running host (built from source) emits it. Declaring
+// it here mirrors the upstream declaration exactly, so the listener types.
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    'agent-preset/selected'(sessionId: SessionId, agentPreset: string): void
+  }
+}
 
 /** The preset id this plugin installs and locks sessions to. */
 export const PRESET_ID = 'no-workspace'
 
-/** Settings namespace carrying the isolated root to the browser half. */
+/** Settings namespace carrying the isolated root to consumers. */
 export const SETTINGS_NS = settingsNamespace('dsh-no-workspace')
 
 /** Plugin config: deployment overrides for the isolation root and defaults. */
 export interface Config {
   /** Isolated directory root; defaults to `$DSH_HOME/.dsh-no-workspace`. */
   isolatedRoot?: string
-  /** Roster ids hidden from pickers; defaults to this plugin's own preset id. */
-  hiddenPresets?: string[]
   /** Default model for created sessions; defaults to deepseek-v4-flash + low effort. */
   defaultModel?: {
     provider?: string
@@ -51,7 +59,6 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   isolatedRoot: z.string(),
-  hiddenPresets: z.array(String),
   defaultModel: z.object({
     provider: z.string(),
     model: z.string(),
@@ -140,10 +147,12 @@ export const inject = ['commands', 'agents', 'sessions', 'agentPresets', 'settin
  * surface is structurally fixed from birth. The knobs remain switchable, but
  * no mutating tool exists to consume a wider sandbox mode, so a switch has no
  * effect. Idempotent: a session already carrying a turn is left untouched.
+ * The preset is read from the LOG, not the header: a session switched to this
+ * preset while blank (via the picker) has a different creation-time header.
  * @param session - the session to lock; only `no-workspace` sessions are touched.
  */
 export function lockReadonlySession(session: import('@deepseek-ai/dsh-session').Session): void {
-  if (session.header.agentPreset !== PRESET_ID) return
+  if (resolveSessionPreset(session) !== PRESET_ID) return
   if (session.events.some(event => event.type === 'turn/start')) return
   session.append('turn/start', { turn: 1 })
   session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
@@ -159,7 +168,6 @@ export function lockReadonlySession(session: import('@deepseek-ai/dsh-session').
  */
 export function apply(ctx: Context, config: Config): void {
   const isolatedRoot = config.isolatedRoot || dshHomePath('.dsh-no-workspace')
-  const hiddenPresets = config.hiddenPresets?.length ? config.hiddenPresets : [PRESET_ID]
   const defaultModel = config.defaultModel ?? { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'low' }
 
   // The preset install has nothing to undo; the disposer is the empty function.
@@ -168,14 +176,8 @@ export function apply(ctx: Context, config: Config): void {
     return () => {}
   }, 'dsh-no-workspace: preset install into the user roster')
 
-  // The roster-hide decoration: pickers and settings see the hidden preset
-  // ids removed, while resolve/mount keep serving them (session resume and
-  // the command's own create depend on that). Disposal restores the original
-  // method, so unloading the plugin undoes the decoration completely.
-  ctx.effect(() => installHide(ctx, hiddenPresets), 'dsh-no-workspace: roster hide decoration')
-
-  // The isolated root is a browser-visible fact: the workspace-picker menu
-  // entry needs it to issue the create RPC itself.
+  // The isolated root is published for consumers (the tool set reads it to
+  // decide which relative reads may skip approval).
   const settingsSchema: z<{ isolatedRoot: string }> = z.object({ isolatedRoot: z.string().required() })
   installSettingsSection(ctx, SETTINGS_NS, settingsSchema, { isolatedRoot }, {
     setSource: () => {},
@@ -183,9 +185,19 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   // Every no-workspace session gets the lock and the permission seeds at
-  // publication, whichever path created it: this command, the workspace-picker
-  // menu's direct RPC create, or a later resume.
+  // publication, whichever path created it: this command, a direct RPC create,
+  // or a later resume.
   ctx.on('session/created', (session) => {
+    lockReadonlySession(session)
+  })
+
+  // A session switched to this preset while blank (picker) locks the same way:
+  // the zero-length turn pair lands immediately, so the upstream switch guard
+  // refuses every later composition change.
+  ctx.on('agent-preset/selected', (sessionId, agentPreset) => {
+    if (agentPreset !== PRESET_ID) return
+    const session = ctx.sessions.get(sessionId)
+    if (session === undefined) return
     lockReadonlySession(session)
   })
 

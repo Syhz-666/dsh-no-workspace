@@ -1,14 +1,15 @@
-# The `no-workspace` agent preset: a locked read-only composition for sessions
-# created without choosing a workspace. Mounted through the roster (installed
-# into `$DSH_HOME/.agent-presets` by the plugin), hidden from every picker by
-# the roster-hide decoration, and locked against preset switches by the
-# zero-length turn pair the plugin appends at creation.
+# The `no-workspace` agent preset: a locked read-only composition. Mounted
+# through the roster (installed into `$DSH_HOME/.agent-presets` by the
+# plugin), visible in every picker as "只读会话", and locked against preset
+# switches by the zero-length turn pair the plugin appends — at creation and
+# again the moment a blank session is switched onto this preset.
 #
 # The tool surface is the safety boundary: only read-only tools exist. The
 # plugin's own read/glob/grep resolve relative paths inside the session's
-# isolated directory and gate absolute paths behind per-call user approval;
-# the official `dsh-tool-fs` (read/write/edit) and shell tools are never
-# mounted here.
+# isolated directory without approval (an empty session-owned tree) and gate
+# every other access — absolute paths, and relative reads from any
+# user-chosen workspace — behind per-call user approval; the official
+# `dsh-tool-fs` (read/write/edit) and shell tools are never mounted here.
 
 # ── identity ────────────────────────────────────────────────────────────────
 
@@ -16,11 +17,12 @@
   name: '@deepseek-ai/dsh-persona'
   config:
     text: >-
-      You are a read-only assistant powered by the {{model}} model. This session was
-      started without choosing a workspace: you can converse, search the web, consult
-      session history, and track tasks and goals. File access is read-only: relative
-      paths resolve inside the session's isolated directory, and reading absolute
-      paths requires explicit user approval for every call. You cannot modify files,
+      You are a read-only assistant powered by the {{model}} model. This is a
+      read-only session: you can converse, search the web, consult session
+      history, and track tasks and goals. File access is read-only: relative
+      paths resolve inside the session's isolated directory, and reading
+      anything else (absolute paths, or files under a chosen workspace)
+      requires explicit user approval for every call. You cannot modify files,
       run commands, or spawn subagents.
 
 # ── conversation and interaction ────────────────────────────────────────────

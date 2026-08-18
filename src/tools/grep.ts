@@ -1,8 +1,10 @@
 /**
  * The read-only `grep` tool over the packaged ripgrep binary, reusing the
  * upstream `dsh-tool-fs-search` command builders, parser, and runner.
- * Relative targets resolve inside the session's isolated directory; absolute
- * targets require explicit per-call user approval.
+ * Relative targets resolve inside the session's isolated directory without
+ * approval; absolute targets — and relative searches rooted anywhere else (a
+ * user-chosen workspace, or a session without a directory) — require explicit
+ * per-call user approval.
  * @module dsh-no-workspace/tools/grep
  */
 
@@ -17,7 +19,7 @@ import {
   runRipgrep,
   toWorkdirRelative,
 } from '@deepseek-ai/dsh-tool-fs-search'
-import { requireReadApproval } from '../approval.ts'
+import { relativeReadGated, requireReadApproval } from '../approval.ts'
 
 const RAW_OUTPUT_MAX_BYTES = 20_000_000
 const GRACE_MS = 3000
@@ -26,8 +28,10 @@ const STDERR_MAX_BYTES = 65_536
 /**
  * Register the `grep` tool into the current scope (the preset's layer).
  * @param ctx - the preset-scoped plugin context; execution uses the `subprocess` seam.
+ * @param isolatedRoot - the isolation root, read from settings at apply time
+ * (undefined fails closed: relative searches gate too).
  */
-export function applyGrepTool(ctx: Context): void {
+export function applyGrepTool(ctx: Context, isolatedRoot: string | undefined): void {
   ctx.tools.register(defineTool({
     name: 'grep',
     description: 'Search file contents with a regular expression. '
@@ -49,8 +53,13 @@ export function applyGrepTool(ctx: Context): void {
     },
     async execute(args, exec) {
       const input = parseGrepArgs(args)
+      const cwd = exec.agent?.session.header.cwd
       if (input.path !== undefined && isAbsolute(input.path)) {
         await requireReadApproval(ctx, exec, 'grep', input.path)
+      } else if (relativeReadGated(cwd, isolatedRoot)) {
+        // Default target is the session directory; a missing or outside root
+        // would run ripgrep against the server's own working directory.
+        await requireReadApproval(ctx, exec, 'grep', input.path ?? cwd ?? 'the current directory')
       }
       const run = await runRipgrep(ctx, exec, 'grep', buildGrepCommand(input), RAW_OUTPUT_MAX_BYTES, GRACE_MS, STDERR_MAX_BYTES)
       if (run.noMatches) return { matches: [] }

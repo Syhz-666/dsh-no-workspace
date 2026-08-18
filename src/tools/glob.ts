@@ -1,8 +1,10 @@
 /**
  * The read-only `glob` tool over the packaged ripgrep binary, reusing the
  * upstream `dsh-tool-fs-search` command builders and runner. Relative roots
- * resolve inside the session's isolated directory; absolute roots require
- * explicit per-call user approval.
+ * resolve inside the session's isolated directory without approval; absolute
+ * roots — and relative searches rooted anywhere else (a user-chosen
+ * workspace, or a session without a directory) — require explicit per-call
+ * user approval.
  * @module dsh-no-workspace/tools/glob
  */
 
@@ -15,7 +17,7 @@ import {
   runRipgrep,
   toWorkdirRelative,
 } from '@deepseek-ai/dsh-tool-fs-search'
-import { requireReadApproval } from '../approval.ts'
+import { relativeReadGated, requireReadApproval } from '../approval.ts'
 
 const RAW_OUTPUT_MAX_BYTES = 20_000_000
 const GRACE_MS = 3000
@@ -24,8 +26,10 @@ const STDERR_MAX_BYTES = 65_536
 /**
  * Register the `glob` tool into the current scope (the preset's layer).
  * @param ctx - the preset-scoped plugin context; execution uses the `subprocess` seam.
+ * @param isolatedRoot - the isolation root, read from settings at apply time
+ * (undefined fails closed: relative searches gate too).
  */
-export function applyGlobTool(ctx: Context): void {
+export function applyGlobTool(ctx: Context, isolatedRoot: string | undefined): void {
   ctx.tools.register(defineTool({
     name: 'glob',
     description: 'Find files whose paths match a glob pattern. Returns matching file paths — never directories. '
@@ -52,8 +56,13 @@ export function applyGlobTool(ctx: Context): void {
     },
     async execute(args, exec) {
       const input = parseGlobArgs(args)
+      const cwd = exec.agent?.session.header.cwd
       if (input.path !== undefined && isAbsolute(input.path)) {
         await requireReadApproval(ctx, exec, 'glob', input.path)
+      } else if (relativeReadGated(cwd, isolatedRoot)) {
+        // Default root is the session directory; a missing or outside root
+        // would run ripgrep against the server's own working directory.
+        await requireReadApproval(ctx, exec, 'glob', input.path ?? cwd ?? 'the current directory')
       }
       const run = await runRipgrep(ctx, exec, 'glob', buildGlobCommand(input), RAW_OUTPUT_MAX_BYTES, GRACE_MS, STDERR_MAX_BYTES)
       const root = input.path === undefined ? '.' : toWorkdirRelative(input.path, run.workdir)

@@ -1,14 +1,16 @@
 /**
  * Approval gate: fail-closed ordering (no service / no agent / rejection /
- * no answerer) and the allowed-once path.
+ * no answerer) and the allowed-once path, plus the isolated-directory gate
+ * that decides which relative reads may skip approval.
  */
 
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ApprovalService from '@deepseek-ai/dsh-user-approval'
 import type { CallId } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { requireReadApproval } from '../src/approval.ts'
+import { relativeReadGated, requireReadApproval } from '../src/approval.ts'
 
 /** A minimal agent whose session carries an open turn (the audit precondition). */
 function openTurnAgent(): Agent {
@@ -75,5 +77,35 @@ describe('requireReadApproval', () => {
     } finally {
       allow()
     }
+  })
+})
+
+describe('relativeReadGated', () => {
+  const root = join('C:', 'x', '.dsh-no-workspace')
+  const inside = join(root, 'session-1')
+  const prefixTwin = join('C:', 'x', '.dsh-no-workspace-evil', 'session-1')
+
+  it('allows relative reads when the session directory sits inside the isolated root', () => {
+    expect(relativeReadGated(inside, root)).toBe(false)
+  })
+
+  it('allows the isolated root itself as the session directory', () => {
+    expect(relativeReadGated(root, root)).toBe(false)
+  })
+
+  it('gates a directory that merely shares the root prefix', () => {
+    expect(relativeReadGated(prefixTwin, root)).toBe(true)
+  })
+
+  it('gates a user-chosen workspace directory', () => {
+    expect(relativeReadGated(join('C:', 'work'), root)).toBe(true)
+  })
+
+  it('gates a session without any directory', () => {
+    expect(relativeReadGated(undefined, root)).toBe(true)
+  })
+
+  it('fails closed when the isolated root is unknown', () => {
+    expect(relativeReadGated(inside, undefined)).toBe(true)
   })
 })
