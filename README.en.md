@@ -15,7 +15,7 @@
 
 ## What is this
 
-`dsh-no-workspace` is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) plugin: it adds a "**No workspace (read-only session)**" entry to the workspace picker and a "**Read-only session**" mode. Whichever entry point you use, the session is structurally locked to read-only — conversation, web search, session history, and task/goal tracking only; file reads require per-call approval, with no shell, no write tools, and no subagents.
+`dsh-no-workspace` is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) plugin: it adds a "**No workspace (read-only session)**" entry to the workspace picker and a "**Read-only session**" mode. Whichever entry point you use, the session is structurally locked to read-only — conversation, web search, session history, and task/goal tracking only; file access is controlled (relative paths inside the isolated directory skip approval, every other read is approved per call), with no shell, no write tools, and no subagents.
 
 ## Key features
 
@@ -76,7 +76,7 @@ Notes:
 
 - Open the workspace picker → "No workspace (read-only session)"; or run the `/readonly-session` command; or create a session and choose "Read-only session" in the mode picker.
 - The session is locked as soon as it is selected: a zero-length `turn/start`+`turn/end` pair makes it permanently non-blank, and the official preset-switch guard (`agent-preset-locked`) rejects any preset change from then on.
-- The default model is `deepseek-v4-flash` with `reasoningEffort: 'low'`; it can be changed manually inside the session at any time.
+- Sessions **created** via the "No workspace" menu entry or the `/readonly-session` command default to `deepseek-v4-flash` with `reasoningEffort: 'low'`; the model can be changed manually inside the session at any time. Sessions switched from the mode picker keep their existing model.
 
 ## Security model
 
