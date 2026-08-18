@@ -9,18 +9,33 @@
 
 ## 安装
 
-前置：官方 dsh 已构建（`pnpm install && pnpm run build`）。
+前置：本机已有一份**已构建**的官方 dsh 项目（在其目录内执行过 `pnpm install && pnpm run build`）。以下步骤中的 `<插件目录>`、`<dsh 项目目录>` 请替换为实际路径，不要照抄示例。
 
 ```sh
-# 1. 构建插件
-cd D:\My-DSH-Plugins\dsh-no-workspace
-pnpm install && pnpm run build
+# 1. 获取插件源码（替换 <仓库地址> 为实际远端地址）
+git clone <仓库地址> dsh-no-workspace
+cd dsh-no-workspace
 
-# 2. 安装进 profile（追加 dsh-no-workspace bundle 行）
-dsh plugin --profile web add D:\My-DSH-Plugins\dsh-no-workspace
+# 2. 构建插件
+pnpm install && pnpm run build
 ```
 
-首次启动时插件会把 `presets/no-workspace` 复制到 `$DSH_HOME/.agent-presets/no-workspace/`（幂等，用户编辑过的副本不会被覆盖）。
+```sh
+# 3. 安装进 web profile（在官方 dsh 项目目录内执行；命令由 dsh CLI 提供）
+cd <dsh 项目目录>
+pnpm dsh plugin --profile web add <插件目录的绝对路径>
+```
+
+```sh
+# 4. 重启 dsh web，浏览器硬刷新（Ctrl+F5）
+pnpm dsh web
+```
+
+说明：
+
+- 第 3 步会把插件登记到 `$DSH_HOME/profiles/web`（`$DSH_HOME` 默认为 `~/.dsh`），路径写法与平台无关；
+- 首次启动时插件把 `presets/no-workspace` 复制到 `$DSH_HOME/.agent-presets/no-workspace/`（幂等，用户编辑过的副本不会被覆盖）；
+- 把本 README 与仓库链接一起交给 AI 时，AI 按上述四步执行即可完成安装，无需任何手工改动官方项目。
 
 ## 使用
 
