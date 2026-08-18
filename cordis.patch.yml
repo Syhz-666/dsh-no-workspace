@@ -1,0 +1,9 @@
+# dsh-no-workspace profile layer. Declared via the `dsh.bundle.patch` manifest
+# field, so `dsh plugin --profile <name> add dsh-no-workspace` reconciles this
+# package into the profile's bundle stack automatically.
+- insert:
+    # The one row: the node half carries the host plugin (command, isolation,
+    # locking, hide decoration, settings namespace); the module scanner also
+    # discovers the browser half through the package's `dsh.client` manifest.
+    - id: no-workspace
+      name: dsh-no-workspace

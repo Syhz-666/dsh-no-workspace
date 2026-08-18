@@ -1,0 +1,78 @@
+# The `no-workspace` agent preset: a locked read-only composition for sessions
+# created without choosing a workspace. Mounted through the roster (installed
+# into `$DSH_HOME/.agent-presets` by the plugin), hidden from every picker by
+# the roster-hide decoration, and locked against preset switches by the
+# zero-length turn pair the plugin appends at creation.
+#
+# The tool surface is the safety boundary: only read-only tools exist. The
+# plugin's own read/glob/grep resolve relative paths inside the session's
+# isolated directory and gate absolute paths behind per-call user approval;
+# the official `dsh-tool-fs` (read/write/edit) and shell tools are never
+# mounted here.
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are a read-only assistant powered by the {{model}} model. This session was
+      started without choosing a workspace: you can converse, search the web, consult
+      session history, and track tasks and goals. File access is read-only: relative
+      paths resolve inside the session's isolated directory, and reading absolute
+      paths requires explicit user approval for every call. You cannot modify files,
+      run commands, or spawn subagents.
+
+# ── conversation and interaction ────────────────────────────────────────────
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+# ── network (read-only) ─────────────────────────────────────────────────────
+
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    search: true
+    fetch: false
+    searchTimeoutMs: 60000
+
+# ── session history (read-only, self-scoped) ────────────────────────────────
+
+- id: tool-session-query
+  name: '@deepseek-ai/dsh-tool-session-query'
+
+# ── filesystem (read-only, approval-gated) ──────────────────────────────────
+
+- id: no-workspace-tools
+  name: 'dsh-no-workspace/tools'
+
+# ── compaction ──────────────────────────────────────────────────────────────
+
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
