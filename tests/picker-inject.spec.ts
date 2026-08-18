@@ -7,7 +7,9 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { injectPickerRegistry, isPickerInjected, PICKER_REGISTRY } from '../src/picker-inject.ts'
+import {
+  injectPickerRegistry, isPickerInjected, missingPickerAnchors, PICKER_ANCHORS, PICKER_REGISTRY,
+} from '../src/picker-inject.ts'
 
 /** A minimal official-bundle-shaped source carrying all three anchors. */
 function officialLike(): string {
@@ -68,6 +70,13 @@ describe('injectPickerRegistry', () => {
     expect(insideHandler('::no-workspace')).toMatchObject({ id: '::no-workspace' })
     // ...but at module top level (before handleSelect's declaration) it throws.
     expect(() => new Function(dispatchWithEntry)()).toThrow(ReferenceError)
+  })
+
+  it('reports exactly which anchors are missing (the boot probe signal)', () => {
+    expect(missingPickerAnchors(officialLike())).toEqual([])
+    const broken = officialLike().replace('const menuIsEmpty = items.length === 0;', 'const count = items.length;')
+    expect(missingPickerAnchors(broken)).toEqual([PICKER_ANCHORS[1]])
+    expect(missingPickerAnchors('')).toEqual([...PICKER_ANCHORS])
   })
 })
 

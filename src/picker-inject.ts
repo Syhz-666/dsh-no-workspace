@@ -49,6 +49,24 @@ const MENU_IS_EMPTY_ANCHOR = 'const menuIsEmpty = items.length === 0;'
 // statement of the official handler is this branch.
 const HANDLE_SELECT_BODY_ANCHOR = 'if (id === ADD_WORKSPACE) {'
 
+/** Every anchor the injection depends on, in application order. */
+export const PICKER_ANCHORS: readonly string[] = [
+  ADD_WORKSPACE_ANCHOR,
+  MENU_IS_EMPTY_ANCHOR,
+  HANDLE_SELECT_BODY_ANCHOR,
+]
+
+/**
+ * Which anchors a bundle text lacks. The menu entry silently degrades when
+ * the official bundle changes shape; naming the missing anchors turns that
+ * silent degradation into an observable, diagnosable log line.
+ * @param source - the official bundle text.
+ * @returns the anchors absent from the text.
+ */
+export function missingPickerAnchors(source: string): string[] {
+  return PICKER_ANCHORS.filter(anchor => !source.includes(anchor))
+}
+
 /** Insert `block` immediately before `anchor` in `source`; undefined when the anchor is absent. */
 function insertBefore(source: string, anchor: string, block: string): string | undefined {
   const index = source.indexOf(anchor)
@@ -80,7 +98,10 @@ export function isPickerInjected(source: string): boolean {
 /**
  * Register the exact bundle route serving the decorated official bundle.
  * No-op when the web surface (webServer) or the client-modules registry is
- * absent — headless deployments have no picker to decorate.
+ * absent — headless deployments have no picker to decorate. Runs a startup
+ * anchor probe so an official bundle that changed shape is visible in the
+ * boot log immediately, instead of only when a user notices the menu entry
+ * is missing.
  * @param ctx - the plugin context.
  * @returns the disposer (empty when nothing was registered).
  */
@@ -90,6 +111,29 @@ export function installPickerInjection(ctx: Context): () => void {
   if (webServer === undefined || clientModules === undefined) return () => {}
 
   const bundlePath = () => clientModules.clientPath(UI_WORKSPACE_PACKAGE)
+
+  // Startup probe: one log line per boot about whether the official bundle
+  // still matches every anchor. Read failures are ignored — the serve-time
+  // handling covers an unreadable bundle.
+  void (async () => {
+    const path = bundlePath()
+    if (path === undefined) return
+    try {
+      const body = await readFile(path, 'utf8')
+      const missing = missingPickerAnchors(body)
+      if (missing.length === 0) {
+        ctx.logger.info(`dsh-no-workspace: picker menu injection ready (all anchors matched in ${UI_WORKSPACE_PACKAGE})`)
+      } else {
+        ctx.logger.warn(
+          `dsh-no-workspace: picker menu anchors missing in ${UI_WORKSPACE_PACKAGE}: ${missing.join(' | ')}; `
+          + 'the workspace-picker menu entry is unavailable, the visible preset and /readonly-session command still work',
+        )
+      }
+    } catch {
+      // Bundle unreadable at boot (not built yet): serve-time handling reports it.
+    }
+  })()
+
   const serve = async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405)
@@ -105,9 +149,11 @@ export function installPickerInjection(ctx: Context): () => void {
     try {
       const body = await readFile(path, 'utf8')
       const decorated = injectPickerRegistry(body)
-      if (!isPickerInjected(decorated)) {
+      const missing = isPickerInjected(decorated) ? [] : missingPickerAnchors(body)
+      if (missing.length > 0) {
         ctx.logger.warn(
-          `dsh-no-workspace: official ${UI_WORKSPACE_PACKAGE} bundle anchors changed; serving the bundle without the picker menu entry`,
+          `dsh-no-workspace: serving the ${UI_WORKSPACE_PACKAGE} bundle without the picker menu entry `
+          + `(missing anchors: ${missing.join(' | ')})`,
         )
       }
       res.writeHead(200, {
