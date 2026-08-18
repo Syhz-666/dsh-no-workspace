@@ -5,7 +5,9 @@
  * ui-workspace bundle.
  */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   injectPickerRegistry, isPickerInjected, missingPickerAnchors, PICKER_ANCHORS, PICKER_REGISTRY,
@@ -80,13 +82,24 @@ describe('injectPickerRegistry', () => {
   })
 })
 
-describe('against the real official bundle', () => {
-  const bundle = readFileSync(
-    'D:/Deepseek-Harness/packages/client/ui-workspace/lib/client.js',
-    'utf8',
-  )
+/**
+ * Locate the built official ui-workspace bundle for the anchor check. An
+ * explicit `DSH_NO_WORKSPACE_UI_BUNDLE` wins; otherwise the sibling
+ * `Deepseek-Harness` checkout (the developer's usual layout, one level up
+ * from this repo's parent) is tried. When neither exists the suite skips —
+ * the anchor contract is only checkable against a real official build.
+ */
+const bundleEnv = process.env.DSH_NO_WORKSPACE_UI_BUNDLE
+const siblingBundle = join(
+  fileURLToPath(new URL('..', import.meta.url)),
+  '..', '..', '..', 'Deepseek-Harness', 'packages', 'client', 'ui-workspace', 'lib', 'client.js',
+)
+const officialBundlePath = bundleEnv ?? (existsSync(siblingBundle) ? siblingBundle : undefined)
 
+describe.skipIf(officialBundlePath === undefined)('against the real official bundle', () => {
   it('still matches every anchor of the current official build', () => {
+    // Read inside the test so a skipped suite never touches the filesystem.
+    const bundle = readFileSync(officialBundlePath as string, 'utf8')
     const decorated = injectPickerRegistry(bundle)
     expect(isPickerInjected(decorated)).toBe(true)
   })
