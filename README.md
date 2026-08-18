@@ -5,7 +5,7 @@
   不选工作区，即刻开始；会话一经创建，永久只读。
 </p>
 
-<p align="center"><sub>社区插件，并非 DeepSeek 官方产品。</sub></p>
+<p align="center"><sub>社区插件，并非 DeepSeek 官方产品。中文 · <a href="README.en.md">English</a></sub></p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
