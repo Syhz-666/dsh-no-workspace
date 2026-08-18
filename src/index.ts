@@ -109,7 +109,7 @@ export async function createReadonlySession(
   const id = sessionId ?? (`session-${randomUUID()}` as SessionId)
   const cwd = join(isolatedRoot, id)
   await mkdir(cwd, { recursive: true })
-  const agent = await ctx.agents.create({
+  const handle = await ctx.agents.create({
     sessionId: id,
     meta: { cwd, agentPreset: PRESET_ID },
     agentOptions: {
@@ -121,17 +121,18 @@ export async function createReadonlySession(
     },
     setup: agentCtx => ctx.agentPresets.mount(agentCtx, PRESET_ID).then(() => undefined),
   })
+  const session = handle.agent.session
   // Lock the composition: a closed zero-length turn makes the session
   // non-blank, so the upstream switch guard permanently refuses any preset
   // change — the read-only tool surface is structurally fixed from birth.
-  agent.session.append('turn/start', { turn: 1 })
-  agent.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+  session.append('turn/start', { turn: 1 })
+  session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
   // Permission stance: read-only + interactive approval (fail-closed without
   // an answerer). The knobs remain switchable, but no mutating tool exists to
   // consume a wider sandbox mode, so a switch has no effect.
-  setSandboxMode(agent.session, 'read-only')
-  setApprovalPolicy(agent.session, 'ask')
-  return agent.session
+  setSandboxMode(session, 'read-only')
+  setApprovalPolicy(session, 'ask')
+  return session
 }
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -151,8 +152,10 @@ export function apply(ctx: Context, config: Config): void {
   const hiddenPresets = config.hiddenPresets ?? [PRESET_ID]
   const defaultModel = config.defaultModel ?? { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'low' }
 
+  // The preset install has nothing to undo; the disposer is the empty function.
   ctx.effect(() => {
     void installPreset(ctx)
+    return () => {}
   }, 'dsh-no-workspace: preset install into the user roster')
 
   // The roster-hide decoration: pickers and settings see the hidden preset

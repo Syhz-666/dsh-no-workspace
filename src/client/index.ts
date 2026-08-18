@@ -72,7 +72,9 @@ async function startReadonlySession(ctx: ClientContext): Promise<void> {
   if (!created.result.ok) return
   const sessionId = created.result.value?.sessionId
   if (sessionId === undefined) return
-  ctx.sessions.open(sessionId as never)
+  // The sessions face is declared through the runtime's cordis Context merge;
+  // open() is its navigation entry point.
+  ;(ctx as unknown as { sessions: { open(id: string): void } }).sessions.open(sessionId)
 }
 
 /**

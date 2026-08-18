@@ -54,7 +54,7 @@ export function applyGrepTool(ctx: Context): void {
       }
       const run = await runRipgrep(ctx, exec, 'grep', buildGrepCommand(input), RAW_OUTPUT_MAX_BYTES, GRACE_MS, STDERR_MAX_BYTES)
       if (run.noMatches) return { matches: [] }
-      const matches = parseGrepMatches(run.stdout, exec, 'grep')
+      const matches = parseGrepMatches(run.stdout)
       return {
         matches: matches.map(match => ({
           ...match,
