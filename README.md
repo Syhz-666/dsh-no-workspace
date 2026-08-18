@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>为 DeepSeek Harness 提供「只读会话」的插件。</strong><br>
-  不选工作区，即刻开始；会话一经创建，永久只读。
+  不选工作区，即刻开始；一经选择，永久只读。
 </p>
 
 <p align="center"><sub>社区插件，并非 DeepSeek 官方产品。中文 · <a href="README.en.md">English</a></sub></p>

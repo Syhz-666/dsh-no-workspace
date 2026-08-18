@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>A plugin that provides read-only sessions for DeepSeek Harness.</strong><br>
-  Start without choosing a workspace; once created, a session stays read-only forever.
+  Start without choosing a workspace; once chosen, read-only forever.
 </p>
 
 <p align="center"><sub>A community plugin, not an official DeepSeek product. <a href="README.md">中文</a> · English</sub></p>
