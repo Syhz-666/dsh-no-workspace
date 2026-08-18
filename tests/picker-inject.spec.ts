@@ -16,7 +16,11 @@ function officialLike(): string {
     'const items = [];',
     'const menuIsEmpty = items.length === 0;',
     'const handleSelect = (id) => {',
-    '  if (id === ADD_WORKSPACE) return openWorkspaceDialog();',
+    '  if (id === ADD_WORKSPACE) {',
+    '    openDirectoryFlow();',
+    '    return;',
+    '  }',
+    '  onPick(id);',
     '};',
   ].join('\n')
 }
@@ -27,9 +31,16 @@ describe('injectPickerRegistry', () => {
     expect(decorated).toContain(`${PICKER_REGISTRY} = ${PICKER_REGISTRY} || [];`)
     expect(decorated).toContain('for (const __dshMake of')
     expect(decorated).toContain('__dshExtra.onPick(); onClose(); return;')
-    expect(decorated.indexOf('__dshExtra')).toBeGreaterThan(decorated.indexOf('const ADD_WORKSPACE'))
-    expect(decorated.indexOf('for (const __dshMake')).toBeGreaterThan(decorated.indexOf('const ADD_WORKSPACE'))
     expect(isPickerInjected(decorated)).toBe(true)
+  })
+
+  it('lands the dispatch hook INSIDE handleSelect (id and onClose are in scope), never at module top level', () => {
+    const decorated = injectPickerRegistry(officialLike())
+    const handleSelectAt = decorated.indexOf('const handleSelect = (id) => {')
+    const dispatchAt = decorated.indexOf('__dshExtra.onPick(); onClose(); return;')
+    const bodyAnchorAt = decorated.indexOf('if (id === ADD_WORKSPACE) {')
+    expect(dispatchAt).toBeGreaterThan(handleSelectAt)
+    expect(dispatchAt).toBeLessThan(bodyAnchorAt)
   })
 
   it('is idempotent: an already decorated bundle is returned untouched', () => {
@@ -41,9 +52,22 @@ describe('injectPickerRegistry', () => {
   it('fails closed when any anchor is missing (official bundle changed shape)', () => {
     const missingMenu = officialLike().replace('const menuIsEmpty = items.length === 0;', 'const count = items.length;')
     expect(injectPickerRegistry(missingMenu)).toBe(missingMenu)
-    const missingSelect = officialLike().replace('const handleSelect = (id) => {', 'const pick = (id) => {')
+    const missingSelect = officialLike().replace('if (id === ADD_WORKSPACE) {', 'if (id === "::add") {')
     expect(injectPickerRegistry(missingSelect)).toBe(missingSelect)
     expect(isPickerInjected(injectPickerRegistry(missingMenu))).toBe(false)
+  })
+
+  it('pins the crash the old placement caused: with a registered entry, the dispatch code at module top level throws on the `id` reference', () => {
+    // An empty registry never calls the find callback, so the module loads;
+    // the moment a plugin has registered an entry (our client half does), the
+    // top-level find evaluates `entry.id === id` and throws a ReferenceError
+    // that kills the whole ui-workspace bundle.
+    const dispatchWithEntry = 'const __dshExtra = ([() => ({ id: "::no-workspace" })]).map((make) => make()).find((entry) => entry.id === id);'
+    // Inside a handler with `id` in scope it evaluates fine...
+    const insideHandler = new Function('id', `${dispatchWithEntry}\nreturn __dshExtra;`)
+    expect(insideHandler('::no-workspace')).toMatchObject({ id: '::no-workspace' })
+    // ...but at module top level (before handleSelect's declaration) it throws.
+    expect(() => new Function(dispatchWithEntry)()).toThrow(ReferenceError)
   })
 })
 

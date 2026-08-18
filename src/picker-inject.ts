@@ -44,7 +44,10 @@ if (__dshExtra !== undefined) { __dshExtra.onPick(); onClose(); return; }
 
 const ADD_WORKSPACE_ANCHOR = 'const ADD_WORKSPACE = "::add-workspace";'
 const MENU_IS_EMPTY_ANCHOR = 'const menuIsEmpty = items.length === 0;'
-const HANDLE_SELECT_ANCHOR = 'const handleSelect = (id) => {'
+// The dispatch hook must land INSIDE handleSelect's body: it reads the `id`
+// parameter and calls `onClose`, both in the handler's scope. The first body
+// statement of the official handler is this branch.
+const HANDLE_SELECT_BODY_ANCHOR = 'if (id === ADD_WORKSPACE) {'
 
 /** Insert `block` immediately before `anchor` in `source`; undefined when the anchor is absent. */
 function insertBefore(source: string, anchor: string, block: string): string | undefined {
@@ -65,7 +68,7 @@ export function injectPickerRegistry(source: string): string {
   if (next === undefined) return source
   next = insertBefore(next, MENU_IS_EMPTY_ANCHOR, MERGE_BLOCK)
   if (next === undefined) return source
-  next = insertBefore(next, HANDLE_SELECT_ANCHOR, DISPATCH_BLOCK)
+  next = insertBefore(next, HANDLE_SELECT_BODY_ANCHOR, DISPATCH_BLOCK)
   return next ?? source
 }
 
