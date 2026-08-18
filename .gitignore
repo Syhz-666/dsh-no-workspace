@@ -1,5 +1,29 @@
-node_modules/
+# build output
 lib/
+dist/
 coverage/
+
+# dependencies
+node_modules/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# logs
 *.log
+npm-debug.log*
+yarn-error.log*
+
+# environment files (keep .env.example if you add one)
+.env
+.env.*
+!.env.example
+
+# IDE / editor local config
+.vscode/
+.idea/
+*.swp
+
+# OS noise
 .DS_Store
+Thumbs.db
