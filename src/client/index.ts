@@ -33,8 +33,13 @@ declare global {
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'dsh-no-workspace-client'
 
-/** No hard service dependencies: the connection handle and sessions face are read off ctx. */
-export const inject: readonly string[] = []
+/**
+ * Hard service dependencies: the sessions face (list snapshot + open) and the
+ * connection handle (API client). Only injected services bind as ctx
+ * properties — without the declaration, `ctx.sessions` is undefined at
+ * runtime and the open flow dies.
+ */
+export const inject: readonly string[] = ['sessions', 'connection']
 
 /** The settings namespace the host half publishes the isolated root in. */
 const SETTINGS_NS = 'dsh-no-workspace'
@@ -104,6 +109,8 @@ async function startReadonlySession(ctx: ClientContext): Promise<void> {
   const connection = ctx.get('connection') as { api: MenuApi } | undefined
   const root = await isolatedRoot(ctx)
   if (connection === undefined || root === undefined) return
+  // The sessions face is bound at runtime through the inject declaration;
+  // the cast dodges the host-side SessionStore declaration merging over it.
   const sessions = (ctx as unknown as { sessions: SessionsFace }).sessions
   const cwd = `${root.replace(/[\\/]+$/, '')}/session-${crypto.randomUUID()}`
   const created = await connection.api.sessions.create({ cwd, agentPreset: PRESET_ID })
