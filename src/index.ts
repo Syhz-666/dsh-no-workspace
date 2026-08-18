@@ -1,8 +1,9 @@
 /**
  * dsh-no-workspace host plugin: the "read-only session" entry point. Owns the
- * isolated directory, the `/readonly-session` command, the preset install
- * into the user roster (visible in every picker), the settings namespace
- * exposing the isolated root, and the structural lock that makes a
+ * isolated directory, the `/readonly-session` command, the workspace-picker
+ * menu injection (served in memory, never written to official files), the
+ * preset install into the user roster (visible in every picker), the settings
+ * namespace exposing the isolated root, and the structural lock that makes a
  * no-workspace session permanently read-only. The read-only tool set
  * registers through the preset row (`./tools` subpath), so it lands in the
  * preset's scope layer.
@@ -29,6 +30,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import { setApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
+import { installPickerInjection } from './picker-inject.ts'
 
 // The published 0.1.0-rc.7 typings predate the upstream `agent-preset/selected`
 // event declaration; the running host (built from source) emits it. Declaring
@@ -175,6 +177,11 @@ export function apply(ctx: Context, config: Config): void {
     void installPreset(ctx)
     return () => {}
   }, 'dsh-no-workspace: preset install into the user roster')
+
+  // The workspace-picker menu entry: the official picker bundle is served
+  // through an exact route with the registry mechanism injected in memory.
+  // No official file is ever written, so rebuilds and upgrades keep working.
+  ctx.effect(() => installPickerInjection(ctx), 'dsh-no-workspace: picker menu injection route')
 
   // The isolated root is published for consumers (the tool set reads it to
   // decide which relative reads may skip approval).

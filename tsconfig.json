@@ -9,7 +9,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "target": "ES2024",
-    "lib": ["ES2024"],
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "strict": true,
     "noImplicitAny": true,
     "skipLibCheck": true,

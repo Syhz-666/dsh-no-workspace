@@ -17,13 +17,13 @@
 
 零上游源码改动，但需要向官方构建产物注入"菜单项注册表"。该方案在用户侧暴露了持久性缺陷：官方包任意重建（`pnpm run build`）都会覆盖注入，菜单项随之消失，且需要重新 apply。放弃。
 
-### 2.3 可见预设方案（✅ 当前）
+### 2.3 可见预设 + 运行时菜单注入方案（✅ 当前）
 
-妥协设计：**不做隐藏、不碰官方构建产物**。`no-workspace` 预设（「只读会话」）直接出现在模式选择器里，用户创建会话后切换即可；`/readonly-session` 命令保留「无工作区」创建路径。
+用户要求工作区选择器保留「不使用工作区」菜单项，同时拒绝一切落盘修改官方产物的方案。最终形态：**预设可见（不做隐藏）+ 菜单项由 host 端精确路由在 serve 时注入**。
 
 | 能力 | 机制 | 扩展点 |
 |---|---|---|
-| 会话创建 | `/readonly-session` 命令（隔离目录 cwd）+ 模式选择器切换预设 | commands registry、官方 `agentPreset.select` |
+| 会话创建 | 选择器菜单项「不使用工作区（只读会话）」（client 调官方 RPC，隔离目录 cwd）+ `/readonly-session` 命令 + 模式选择器切换预设 | commands registry、官方 `session.create`/`agentPreset.select` |
 | 隔离目录 | `$DSH_HOME/.dsh-no-workspace/<sessionId>/`（空）作为 cwd | host 逻辑 |
 | 只读工具面 | `no-workspace` 预设只挂插件自实现 `read`/`glob`/`grep` + 官方只读工具 | preset roster、tools registry |
 | 工具面锁定 | 成为 no-workspace 的瞬间（创建 `session/created` **或** blank 期切换 `agent-preset/selected`）写入零长度 `turn/start`+`turn/end` → 永久非 blank → 上游 `agent-preset-locked` 永久禁切预设 | session 日志 append（公开 API）+ 上游既有守卫 |
@@ -31,10 +31,13 @@
 | 文件访问受控 | 绝对路径 → 每次调用审批；相对路径 → 仅当会话目录位于隔离根内免审批，否则同样审批；无会话目录的相对读取直接拒绝 | settings 命名空间 + 工具执行门 |
 | 低配默认 | 命令创建时 `agentOptions` 指定 `deepseek-v4-flash` + `reasoningEffort: 'low'`；会话内可手动改 | 官方模型选择器 |
 | 预设分发 | 首次启动把 `presets/no-workspace` 复制到 `$DSH_HOME/.agent-presets/`（幂等） | 用户 preset root（`includeUserRoot`） |
+| 菜单项 | **运行时注入**：注册 exact 路由 `/plugins/@deepseek-ai/dsh-client-ui-workspace/client.js`（官方 prefix 路由的精确覆盖优先），serve 时在内存中向官方 bundle 文本注入「菜单项注册表」机制；浏览器端插件向注册表 push 菜单项 | `webServer.register`（公开 API）+ `clientModules.clientPath` |
 
-**为何放弃隐藏**：隐藏依赖装饰 `agentPresets.list`，与 patch 方案同理引入共享面；且用户实际使用中「先创建会话、再选只读预设」与「选择器里直接可见」体验差异不大。可见预设让插件退化为纯扩展点使用：无官方文件接触、无服务装饰、无构建产物依赖，官方包重建/升级零影响。
+**为何不用磁盘 patch**：patch 打在构建产物上，官方重建即失效（用户已踩坑两次）。运行时注入每次请求现读现注入：官方重建、升级、`pnpm install` 后依然生效；官方文件字节零改动（`git status` 干净）；路由随插件卸载精确还原。anchor 缺失（官方 bundle 改版）时原样 serve + warn，菜单项优雅降级为可见预设与命令入口。
 
 **切换路径的锁定**：上游在 select 提交时发出 `agent-preset/selected`（sessionId, preset）事件；插件监听它，对切到 no-workspace 的会话立即执行与创建路径相同的锁定（幂等）。`lockReadonlySession` 的预设判定改用 `resolveSessionPreset`（读日志、优先最新选择事件），因此 header 非本预设的切换会话同样被锁。
+
+**切换锁定的微任务延迟**：`agent-preset/selected` 在 selection 事件自身的 session/event 发布中同步触发，此时直接 append 会命中上游 reenter 拒绝（`session append cannot reenter while another append is being published`），异常被监听器 containment 吞掉、锁静默不落（实测抓到）。锁定因此延迟一个微任务，待发布关闭后执行；RPC 级连续切换不可能落在同一事件循环轮次，守卫无竞态窗口。
 
 **可见化带来的加固**：预设可见后，用户可能以任意工作区 cwd 创建会话再切换 → 相对路径解析落在用户目录。为此 `read`/`glob`/`grep` 的相对免审批条件收紧为「会话目录位于 `settings.dsh-no-workspace.isolatedRoot` 之内」；其余相对读取（工作区、无目录会话）一律逐次审批，settings 不可读时失败关闭（全部审批）。
 
@@ -51,7 +54,7 @@
 **放弃的承诺（对比融合版）**：
 1. "真·无 cwd" → 空隔离目录（安全等价：目录无用户文件）。
 2. 权限锁定 → 不锁定（无写工具，切换无效果；UI 语义差异靠 prompt 节与文档澄清）。
-3. 选择器菜单项 / 预设隐藏 → 放弃；预设直接可见，官方产物零修改。
+3. 预设隐藏 → 放弃；预设直接可见，与菜单项双入口并存。
 
 ## 4. 关键决策与权衡
 
@@ -59,6 +62,7 @@
 - **锁定用零长度 turn 对**：上游文档明确支持"无 step 的 turn"；成对写入避免 crash-tail 修复歧义；模型不可见。
 - **锁定判定读日志而非 header**：`resolveSessionPreset` 优先最新 `agent-preset/selected` 事件——切换会话的 header 仍写创建时预设，读 header 会漏锁。
 - **切换锁定监听上游事件**：`agent-preset/selected` 是官方发布的事件（npm 类型缺失时插件本地补声明，签名与上游一致）。
+- **菜单注入用精确路由而非磁盘 patch**：`webServer.match` 先查 exact 表——我们的 exact 路由自然优先于官方 prefix `/plugins` 路由；serve 时注入、请求即读盘，官方重建永不失效；anchor 缺失 fail-closed。
 - **审批门逐次调用**：每次受控读取都走 `ctx.approval.request`，`allowed-once` 才执行；无应答者/拒绝/取消一律失败关闭。
 - **相对免审批边界用路径前缀 + 分隔符**：`cwd === root` 或 `cwd.startsWith(root + sep)` 才免审批，`root` 的同前缀孪生目录（如 `…-evil`）仍审批。
 - **旧会话迁移用官方日志事件**：融合版遗留的 `chat-only` 会话（预设已不存在、无法打开）通过追加 `agent-preset/selected: no-workspace` 事件迁移——`resolveSessionPreset` 优先该事件，header 与历史保持原样；由 `scripts/migrate-legacy-session.mjs` 一次性执行（幂等）。

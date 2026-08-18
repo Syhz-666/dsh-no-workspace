@@ -1,8 +1,8 @@
 # dsh-no-workspace
 
-为 DeepSeek Harness 提供**只读会话**预设（显示名「只读会话」）的插件。
+为 DeepSeek Harness 提供**只读会话**的插件。
 
-- 预设直接出现在模式选择器中（不做隐藏，无需修改官方组件或构建产物）；
+- 工作区选择器菜单里有「**不使用工作区（只读会话）**」入口：直接创建无工作区会话（隔离目录）；预设「只读会话」同时可见于模式选择器；
 - 会话工具面**只读且永久锁定**：只有 `read`/`glob`/`grep`（隔离目录内相对路径免审批；**其余读取每次调用需用户审批**）、`web_search`、会话历史、任务与目标工具；没有 Shell、没有写入工具、没有子代理；
 - 默认模型 `deepseek-v4-flash` + `reasoningEffort: 'low'`，会话内可随时手动修改；
 - `/readonly-session` 命令创建「无工作区」会话：工作目录是 `$DSH_HOME/.dsh-no-workspace/<sessionId>/` 下的空隔离目录。
@@ -24,7 +24,7 @@ dsh plugin --profile web add D:\My-DSH-Plugins\dsh-no-workspace
 
 ## 使用
 
-- 创建会话后在模式选择器中选择「只读会话」；或输入 `/readonly-session` 命令（无工作区会话）。
+- 打开工作区选择器 → 「不使用工作区（只读会话）」；或输入 `/readonly-session` 命令；或创建会话后在模式选择器中选择「只读会话」。
 - 会话一经选择即被锁定：写入零长度 `turn/start`+`turn/end` 使其永久非 blank，官方预设切换守卫（`agent-preset-locked`）从此拒绝任何预设变更。
 
 ## 安全模型
@@ -35,20 +35,20 @@ dsh plugin --profile web add D:\My-DSH-Plugins\dsh-no-workspace
 | 无写入/无命令 | `no-workspace` 预设只挂只读工具；官方 `tool-fs`（read/write/edit）与 Shell 工具从不挂载 |
 | 文件访问受控 | 绝对路径 → 每次调用用户审批（fail-closed）；相对路径 → 仅当会话目录位于隔离根（`settings.dsh-no-workspace.isolatedRoot`）之内时免审批，否则同样审批；无会话目录的读取直接拒绝 |
 | 权限旋钮无效果 | 沙箱模式可切换，但没有写工具消费更宽的模式；只读由工具面结构性保证 |
-| 与官方构建零耦合 | 不修改官方源码、不修改官方构建产物、不装饰任何官方服务；重新构建/升级官方包后无需任何重放操作 |
+| 与官方构建零耦合 | 不修改官方源码、不修改官方构建产物、不装饰任何官方服务；菜单项由精确路由在 serve 时于内存中注入官方 bundle，重新构建/升级官方包后无需任何重放操作 |
 
 ## 兼容性
 
 - 工具/命令/预设各守各的作用域与数据；不覆盖任何官方组件；
 - 唯一的共享面是用户预设名录（`$DSH_HOME/.agent-presets/no-workspace`），由插件安装、幂等复制；
-- 不依赖发行层补丁，官方包重建、升级、`pnpm install` 均不影响本插件。
+- 菜单项由 host 端的精确路由在 serve 时注入官方 bundle 内容（内存装饰，可逆，卸载即还原）；官方包重建、升级、`pnpm install` 均不影响本插件。
 
 ## 开发
 
 ```sh
 pnpm install
-pnpm run build     # tsc（host）+ tsdown（node bundle）
+pnpm run build     # tsc（host）+ tsdown（host + browser bundle）
 pnpm test          # vitest
 ```
 
-目录：`src/`（命令/隔离/锁定/设置）、`src/tools/`（只读工具）、`presets/`（预设组合）。
+目录：`src/`（命令/隔离/锁定/设置/菜单注入）、`src/tools/`（只读工具）、`src/client/`（菜单项）、`presets/`（预设组合）。

@@ -65,3 +65,4 @@ minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-user-questions@0.1.0-rc.7'
   - '@deepseek-ai/dsh-web@0.1.0-rc.7'
   - '@deepseek-ai/dsh-workspace@0.1.0-rc.7'
+  - '@deepseek-ai/dsh-client-modules@0.1.0-rc.7'
